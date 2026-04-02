@@ -4,19 +4,23 @@ import { Leaf, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../App';
 import './AuthPage.css';
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({
+    name: '', email: '', password: '', store: ''
+  });
   const [showPass, setShowPass] = useState(false);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
 
   const validate = () => {
     const e = {};
+    if (!form.name.trim()) e.name = 'Full name is required';
     if (!form.email) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Enter a valid email';
     if (!form.password) e.password = 'Password is required';
+    else if (form.password.length < 8) e.password = 'Min 8 characters';
     return e;
   };
 
@@ -25,8 +29,8 @@ export default function LoginPage() {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1000));
-    login({ name: 'Anika Patel', email: form.email, role: 'Store Owner' });
+    await new Promise(r => setTimeout(r, 1200));
+    login({ name: form.name, email: form.email, role: 'Store Owner' });
     navigate('/dashboard');
   };
 
@@ -43,7 +47,7 @@ export default function LoginPage() {
         <div className="auth-sidebar-content">
           <Link to="/" className="auth-brand">
             <div className="logo-icon"><Leaf size={18} /></div>
-            <span className="font-display">FreshCast</span>
+            <span className="font-display">LocalFresh</span>
           </Link>
           
           <h1 className="auth-hero-title font-display">
@@ -78,16 +82,25 @@ export default function LoginPage() {
       <div className="auth-main">
         <div className="auth-container">
           <div className="auth-header">
-            <h2 className="auth-title font-display">Welcome back</h2>
-            <p className="auth-subtitle">Please enter your details to sign in.</p>
-          </div>
-
-          <div className="demo-hint">
-            💡 Demo: use any email &amp; password
+            <h2 className="auth-title font-display">Create account</h2>
+            <p className="auth-subtitle">Start your 14-day free trial today.</p>
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form" noValidate>
             
+            {/* Full Name */}
+            <div className="form-group">
+              <label className="form-label">Full Name</label>
+              <input
+                type="text"
+                className={`form-control ${errors.name ? 'error' : ''}`}
+                placeholder="Anika Patel"
+                value={form.name}
+                onChange={e => handleChange('name', e.target.value)}
+              />
+              {errors.name && <span className="field-error">{errors.name}</span>}
+            </div>
+
             {/* Email Address */}
             <div className="form-group">
               <label className="form-label">Email Address</label>
@@ -103,15 +116,12 @@ export default function LoginPage() {
 
             {/* Password */}
             <div className="form-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label className="form-label">Password</label>
-                <a href="#" className="forgot-link">Forgot password?</a>
-              </div>
+              <label className="form-label">Password</label>
               <div className="password-input-wrapper">
                 <input
                   type={showPass ? 'text' : 'password'}
                   className={`form-control ${errors.password ? 'error' : ''}`}
-                  placeholder="••••••••"
+                  placeholder="Min 8 characters"
                   value={form.password}
                   onChange={e => handleChange('password', e.target.value)}
                 />
@@ -122,13 +132,27 @@ export default function LoginPage() {
               {errors.password && <span className="field-error">{errors.password}</span>}
             </div>
 
+            {/* Store Name (optional) */}
+            <div className="form-group">
+              <label className="form-label">
+                Store Name <span className="optional">(optional)</span>
+              </label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Green Basket Market"
+                value={form.store}
+                onChange={e => handleChange('store', e.target.value)}
+              />
+            </div>
+
             <button type="submit" className={`btn btn-primary auth-submit ${loading ? 'loading' : ''}`} disabled={loading}>
-              {loading ? <span className="spinner" /> : 'Sign In →'}
+              {loading ? <span className="spinner" /> : 'Create Account →'}
             </button>
           </form>
 
           <div className="auth-footer">
-            Don't have an account? <Link to="/register" className="auth-link">Create one free</Link>
+            Already have an account? <Link to="/login" className="auth-link">Sign in</Link>
           </div>
         </div>
       </div>

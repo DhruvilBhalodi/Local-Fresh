@@ -28,7 +28,7 @@ export default function Navbar() {
             <Leaf size={20} />
           </div>
           <span className="logo-text font-display">
-            Fresh<span className="text-gradient">Cast</span>
+            Local<span className="text-gradient">Fresh</span>
           </span>
         </Link>
 

@@ -147,7 +147,7 @@ export default function DashboardPage() {
         <div className="sidebar-logo">
           <Link to="/" className="flex gap-2" style={{ display:'flex', alignItems:'center', gap:8 }}>
             <div className="logo-icon"><Leaf size={16} /></div>
-            <span className="font-display sidebar-brand-text">Fresh<span className="text-gradient">Cast</span></span>
+            <span className="font-display sidebar-brand-text">Local<span className="text-gradient">Fresh</span></span>
           </Link>
           <button className="sidebar-close" onClick={() => setSidebarOpen(false)}>
             <X size={18} />
