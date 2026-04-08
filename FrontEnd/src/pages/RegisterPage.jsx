@@ -26,12 +26,49 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      return;
+    }
+
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1200));
-    login({ name: form.name, email: form.email, role: 'Store Owner' });
-    navigate('/dashboard');
+
+    try {
+      const response = await fetch("http://127.0.0.1:5000/api/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password,
+          user_name: form.name
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.status === "success") {
+        // Auto login after register
+        login({
+          name: form.name,
+          email: form.email,
+          role: "Store Owner"
+        });
+
+        navigate("/dashboard");
+      } else {
+        setErrors({ general: data.message });
+      }
+
+    } catch (error) {
+      console.error(error);
+      setErrors({ general: "Server error" });
+    }
+
+    setLoading(false);
   };
 
   const handleChange = (field, value) => {

@@ -52,24 +52,24 @@ def login():
             "message": "Invalid email or password"
         })
     
-# ✅ REGISTER
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.json
+
     email = data.get('email', '').strip().lower()
     password = data.get('password', '').strip()
     user_name = data.get('user_name', '').strip()
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    
-    # Check for existing email or username
+
+    # Check if user already exists
     cursor.execute(
         "SELECT email, user_name FROM users WHERE email = %s OR user_name = %s",
         (email, user_name)
     )
     existing_user = cursor.fetchone()
-    
+
     if existing_user:
         cursor.close()
         conn.close()
@@ -77,14 +77,14 @@ def register():
             "status": "failed",
             "message": "Email or username already exists"
         })
-    
+
     # Insert new user
     cursor.execute(
-        "INSERT INTO users (email, pass, user_name) VALUES (%s, %s, %s",
+        "INSERT INTO users (email, pass, user_name) VALUES (%s, %s, %s)",
         (email, password, user_name)
     )
     conn.commit()
-    
+
     cursor.close()
     conn.close()
 

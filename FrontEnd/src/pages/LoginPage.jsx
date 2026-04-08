@@ -22,12 +22,47 @@ export default function LoginPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      return;
+    }
+
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1000));
-    login({ name: 'Anika Patel', email: form.email, role: 'Store Owner' });
-    navigate('/dashboard');
+
+    try {
+      const response = await fetch("http://127.0.0.1:5000/api/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.status === "success") {
+        login({
+          name: data.user,
+          email: form.email,
+          role: data.user_type
+        });
+
+        navigate("/dashboard");
+      } else {
+        setErrors({ general: data.message });
+      }
+
+    } catch (error) {
+      console.error(error);
+      setErrors({ general: "Server error" });
+    }
+
+    setLoading(false);
   };
 
   const handleChange = (field, value) => {
@@ -80,10 +115,6 @@ export default function LoginPage() {
           <div className="auth-header">
             <h2 className="auth-title font-display">Welcome back</h2>
             <p className="auth-subtitle">Please enter your details to sign in.</p>
-          </div>
-
-          <div className="demo-hint">
-            💡 Demo: use any email &amp; password
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form" noValidate>
