@@ -1,0 +1,5 @@
+models/
+*.pkl
+*.csv
+__pycache__/
+*.pyc

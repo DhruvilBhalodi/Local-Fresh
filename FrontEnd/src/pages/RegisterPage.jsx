@@ -51,11 +51,11 @@ export default function RegisterPage() {
       const data = await response.json();
 
       if (data.status === "success") {
-        // Auto login after register
+        // Auto login after register — store same fields as LoginPage
         login({
-          name: form.name,
-          email: form.email,
-          role: "Store Owner"
+          user_name: data.user_name || form.name,
+          email: data.email || form.email,
+          user_id: data.user_id
         });
 
         navigate("/dashboard");

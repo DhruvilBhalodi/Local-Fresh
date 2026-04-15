@@ -47,9 +47,9 @@ export default function LoginPage() {
 
       if (data.status === "success") {
         login({
-          name: data.user,
-          email: form.email,
-          role: data.user_type
+          user_name: data.user_name,
+          email: data.email || form.email,
+          user_id: data.user_id
         });
 
         navigate("/dashboard");
