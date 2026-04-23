@@ -46,13 +46,16 @@ export default function LoginPage() {
       const data = await response.json();
 
       if (data.status === "success") {
-        login({
-          user_name: data.user_name,
-          email: data.email || form.email,
-          user_id: data.user_id
-        });
-
-        navigate("/dashboard");
+        if (email == data.email) {
+          login({
+            user_name: data.user_name,
+            email: data.email || form.email,
+            user_id: data.user_id
+          });
+          navigate("/dashboard");
+        } else {
+          setErrors({ general: "Invalid email or password" });
+        }
       } else {
         setErrors({ general: data.message });
       }
@@ -80,18 +83,18 @@ export default function LoginPage() {
             <div className="logo-icon"><Leaf size={18} /></div>
             <span className="font-display">LocalFresh</span>
           </Link>
-          
+
           <h1 className="auth-hero-title font-display">
             Smarter inventory.<br />
             Less waste.<br />
             More profit.
           </h1>
-          
+
           <p className="auth-hero-subtitle">
             Predict your daily vegetable and fruit sales using AI —<br />
             and stop throwing money in the bin.
           </p>
-          
+
           <div className="auth-features">
             <div className="auth-feature">
               <span className="auth-feature-emoji">🍎</span>
@@ -118,7 +121,7 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form" noValidate>
-            
+
             {/* Email Address */}
             <div className="form-group">
               <label className="form-label">Email Address</label>

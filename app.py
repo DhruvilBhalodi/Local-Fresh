@@ -56,9 +56,67 @@ def init_tables():
             FOREIGN KEY (fruit_id) REFERENCES fruits(fruit_id)
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS daily_predictions (
+            user_id INT NOT NULL,
+            predict_date DATE NOT NULL,
+            prediction_json JSON,
+            PRIMARY KEY (user_id, predict_date),
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
     conn.commit()
     cursor.close()
     conn.close()
+
+def get_shelf_status(user_id, today_dt):
+    shelf_status = {}
+    alerts = {"expired": [], "expiring_today": [], "expiring_soon": []}
+    if user_id:
+        try:
+            conn = get_db()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT f.fruit_name, b.spoilage_date, b.quantity_kg
+                FROM fruit_batches b
+                JOIN fruits f ON b.fruit_id = f.fruit_id
+                WHERE b.user_id = %s AND b.is_active = 1
+            """, (user_id,))
+            batches = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            batch_map = {}
+            for row in batches:
+                fn = row['fruit_name']
+                sd = row['spoilage_date']
+                if isinstance(sd, str):
+                    sd = datetime.strptime(sd, '%Y-%m-%d').date()
+                if fn not in batch_map or sd < batch_map[fn]:
+                    batch_map[fn] = sd
+
+            today_date_only = today_dt.date()
+            for fn, sd in batch_map.items():
+                days_left = (sd - today_date_only).days
+                if days_left < 0:
+                    shelf_status[fn] = {"flag": "EXPIRED", "message": "Batch expired!"}
+                    alerts["expired"].append(fn)
+                elif days_left == 0:
+                    shelf_status[fn] = {"flag": "EXPIRING_TODAY", "message": "Expires today!"}
+                    alerts["expiring_today"].append(fn)
+                elif days_left <= 2:
+                    shelf_status[fn] = {"flag": "EXPIRING_SOON", "message": f"{days_left} day(s) left"}
+                    alerts["expiring_soon"].append(fn)
+                else:
+                    shelf_status[fn] = {"flag": "OK", "message": f"{days_left} days left"}
+        except Exception:
+            pass
+
+    for fn in FRUIT_SHELF_LIFE:
+        if fn not in shelf_status:
+            shelf_status[fn] = {"flag": "NO_BATCH", "message": "No batch recorded"}
+            
+    return shelf_status, alerts
 
 # ─── Load ML Models at startup ────────────────────────────────────────────────
 BASE = os.path.dirname(__file__)
@@ -243,15 +301,43 @@ def predict():
         we_e = safe_encode(le_weekend, 'Yes' if is_weekend_val else 'No')
         f_e  = safe_encode(le_festival, festival if festival else 'None')
 
-        # ── Fetch yesterday's waste per fruit for this user ──
+        # ── Fetch custom averages and yesterday's records for this user ──
         yesterday = (today - timedelta(days=1)).date()
         prev_waste = {fr: 0.0 for fr in FRUIT_SHELF_LIFE}
-        prev_qty   = {fr: AVG_DAILY_QTY.get(fr, 20.0) for fr in FRUIT_SHELF_LIFE}
+        
+        user_rolling = {}
+        user_avg_qty = {}
 
         if user_id:
             try:
                 conn = get_db()
                 cursor = conn.cursor(dictionary=True)
+                
+                # Fetch 7-day rolling average for this user
+                cursor.execute("""
+                    SELECT f.fruit_name, AVG(d.quantity_sold) as rolling_avg
+                    FROM daily_records d
+                    JOIN fruits f ON d.fruit_id = f.fruit_id
+                    WHERE d.user_id = %s AND d.date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                    GROUP BY f.fruit_name
+                """, (user_id,))
+                for row in cursor.fetchall():
+                    if row['rolling_avg'] is not None:
+                        user_rolling[row['fruit_name']] = float(row['rolling_avg'])
+                
+                # Fetch 30-day average daily quantity for this user
+                cursor.execute("""
+                    SELECT f.fruit_name, AVG(d.quantity_sold) as avg_qty
+                    FROM daily_records d
+                    JOIN fruits f ON d.fruit_id = f.fruit_id
+                    WHERE d.user_id = %s AND d.date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                    GROUP BY f.fruit_name
+                """, (user_id,))
+                for row in cursor.fetchall():
+                    if row['avg_qty'] is not None:
+                        user_avg_qty[row['fruit_name']] = float(row['avg_qty'])
+
+                # Fetch yesterday's records
                 cursor.execute("""
                     SELECT f.fruit_name, d.waste_quantity, d.quantity_sold
                     FROM daily_records d
@@ -261,19 +347,26 @@ def predict():
                 rows = cursor.fetchall()
                 cursor.close()
                 conn.close()
+                
+                # Default prev_qty based on user's custom 30 day avg else the global const
+                prev_qty = {fr: user_avg_qty.get(fr, AVG_DAILY_QTY.get(fr, 20.0)) for fr in FRUIT_SHELF_LIFE}
+                
                 for row in rows:
                     fn = row['fruit_name']
                     if fn in prev_waste:
                         prev_waste[fn] = float(row['waste_quantity'] or 0)
-                        prev_qty[fn]   = float(row['quantity_sold'] or AVG_DAILY_QTY.get(fn, 20))
+                        prev_qty[fn]   = float(row['quantity_sold'] or user_avg_qty.get(fn, AVG_DAILY_QTY.get(fn, 20)))
             except Exception:
-                pass  # fallthrough to defaults
+                prev_qty = {fr: AVG_DAILY_QTY.get(fr, 20.0) for fr in FRUIT_SHELF_LIFE}
+        else:
+            prev_qty = {fr: AVG_DAILY_QTY.get(fr, 20.0) for fr in FRUIT_SHELF_LIFE}
 
         # ── Classifier input (12 features) ──
         # [w_enc, d_enc, we_enc, f_enc, Month, Season, Is_Festival,
         #  Max_Temp_C, Humidity_%, Precipitation_mm, Rolling_7Day_Avg, Price_Per_Kg]
         # Use a representative fruit's avg values for the classifier
-        avg_rolling_all = np.mean(list(AVG_ROLLING_SALES.values()))
+        user_rolls = list(user_rolling.values())
+        avg_rolling_all = np.mean(user_rolls) if len(user_rolls) > 0 else np.mean(list(AVG_ROLLING_SALES.values()))
         avg_price_all   = np.mean(list(AVG_PRICE_PER_KG.values()))
 
         clf_input = [[
@@ -292,10 +385,10 @@ def predict():
         # ── Regressor predictions per fruit (14 features) ──
         recommendations = {}
         for fruit, reg in regressors.items():
-            avg_roll  = AVG_ROLLING_SALES.get(fruit, avg_rolling_all)
+            avg_roll  = user_rolling.get(fruit, AVG_ROLLING_SALES.get(fruit, avg_rolling_all))
             avg_price = AVG_PRICE_PER_KG.get(fruit, avg_price_all)
             pw        = prev_waste.get(fruit, 0.0)
-            pq        = prev_qty.get(fruit, AVG_DAILY_QTY.get(fruit, 20.0))
+            pq        = prev_qty.get(fruit, user_avg_qty.get(fruit, AVG_DAILY_QTY.get(fruit, 20.0)))
 
             reg_input = [[
                 w_e, d_e, we_e, f_e,
@@ -307,59 +400,11 @@ def predict():
             qty = reg.predict(reg_input)[0]
             recommendations[fruit] = max(0, round(float(qty), 1))
 
-        # ── Shelf status from fruit_batches ──
-        shelf_status = {}
-        alerts = {"expired": [], "expiring_today": [], "expiring_soon": []}
-
-        if user_id:
-            try:
-                conn = get_db()
-                cursor = conn.cursor(dictionary=True)
-                cursor.execute("""
-                    SELECT f.fruit_name, b.spoilage_date, b.quantity_kg
-                    FROM fruit_batches b
-                    JOIN fruits f ON b.fruit_id = f.fruit_id
-                    WHERE b.user_id = %s AND b.is_active = 1
-                """, (user_id,))
-                batches = cursor.fetchall()
-                cursor.close()
-                conn.close()
-
-                batch_map = {}
-                for row in batches:
-                    fn = row['fruit_name']
-                    sd = row['spoilage_date']
-                    if isinstance(sd, str):
-                        sd = datetime.strptime(sd, '%Y-%m-%d').date()
-                    if fn not in batch_map or sd < batch_map[fn]:
-                        batch_map[fn] = sd  # track earliest spoilage
-
-                today_date = today.date()
-                for fn, sd in batch_map.items():
-                    days_left = (sd - today_date).days
-                    if days_left < 0:
-                        shelf_status[fn] = {"flag": "EXPIRED", "message": "Batch expired!"}
-                        alerts["expired"].append(fn)
-                    elif days_left == 0:
-                        shelf_status[fn] = {"flag": "EXPIRING_TODAY", "message": "Expires today!"}
-                        alerts["expiring_today"].append(fn)
-                    elif days_left <= 2:
-                        shelf_status[fn] = {"flag": "EXPIRING_SOON", "message": f"{days_left} day(s) left"}
-                        alerts["expiring_soon"].append(fn)
-                    else:
-                        shelf_status[fn] = {"flag": "OK", "message": f"{days_left} days left"}
-
-            except Exception:
-                pass
-
-        # Fill NO_BATCH for fruits with no active batch
-        for fn in FRUIT_SHELF_LIFE:
-            if fn not in shelf_status:
-                shelf_status[fn] = {"flag": "NO_BATCH", "message": "No batch recorded"}
-
+        shelf_status, alerts = get_shelf_status(user_id, today)
         total_order_kg = round(sum(recommendations.values()), 1)
+        today_date = today.date()
 
-        return jsonify({
+        result_data = {
             "status": "success",
             "date": today.strftime('%Y-%m-%d'),
             "weather": {
@@ -376,10 +421,30 @@ def predict():
             "best_fruit_confidence": confidence,
             "best_fruit_emoji": FRUIT_EMOJIS.get(best_fruit, "🍑"),
             "recommendations": recommendations,
-            "shelf_status": shelf_status,
-            "alerts": alerts,
             "total_order_kg": total_order_kg
-        })
+        }
+        
+        if user_id:
+            try:
+                import json
+                conn = get_db()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO daily_predictions (user_id, predict_date, prediction_json)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE prediction_json = VALUES(prediction_json)
+                """, (user_id, today_date, json.dumps(result_data)))
+                conn.commit()
+                cursor.close()
+                conn.close()
+            except Exception as e:
+                pass
+
+        # Append dynamic properties
+        result_data['shelf_status'] = shelf_status
+        result_data['alerts'] = alerts
+
+        return jsonify(result_data)
 
     except Exception as e:
         import traceback
@@ -416,7 +481,7 @@ def get_dashboard_data():
             SELECT f.fruit_name as name, SUM(d.quantity_sold) as value
             FROM daily_records d
             JOIN fruits f ON d.fruit_id = f.fruit_id
-            WHERE d.user_id = %s
+            WHERE d.user_id = %s AND d.date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
             GROUP BY f.fruit_name
             ORDER BY value DESC
             LIMIT 6
@@ -427,27 +492,19 @@ def get_dashboard_data():
 
         # 3. Recent inventory
         cursor.execute("""
-            SELECT f.fruit_name as product,
-                   d.end_of_day_stock as stock,
-                   d.waste_quantity,
-                   d.date
-            FROM daily_records d
-            JOIN fruits f ON d.fruit_id = f.fruit_id
-            WHERE d.user_id = %s
-            ORDER BY d.date DESC
-            LIMIT 10
+            SELECT f.fruit_name as product, SUM(b.quantity_kg) as stock
+            FROM fruit_batches b
+            JOIN fruits f ON b.fruit_id = f.fruit_id
+            WHERE b.user_id = %s AND b.is_active = 1
+            GROUP BY f.fruit_name
+            ORDER BY stock DESC
         """, (user_id,))
         inventory_raw = cursor.fetchall()
         inventory = []
         for item in inventory_raw:
-            wq = item.get('waste_quantity') or 0
-            waste_risk = 'High' if wq > 10 else ('Medium' if wq > 5 else 'Low')
             inventory.append({
                 'product': item['product'],
-                'stock': item['stock'],
-                'waste_quantity': wq,
-                'date': item['date'].isoformat() if hasattr(item['date'], 'isoformat') else str(item['date']),
-                'wasteRisk': waste_risk
+                'stock': round(float(item['stock'] or 0), 1)
             })
 
         # 4. Alerts from fruit_batches
@@ -557,14 +614,182 @@ def update_waste():
         cursor.execute("SELECT fruit_id, fruit_name FROM fruits")
         fruit_map = {row['fruit_name']: row['fruit_id'] for row in cursor.fetchall()}
 
+        # Verify stock first
+        cursor.execute("""
+            SELECT f.fruit_name, SUM(b.quantity_kg) as stock
+            FROM fruit_batches b
+            JOIN fruits f ON b.fruit_id = f.fruit_id
+            WHERE b.user_id = %s AND b.is_active = 1
+            GROUP BY f.fruit_name
+        """, (user_id,))
+        active_stock = {row['fruit_name']: float(row['stock'] or 0) for row in cursor.fetchall()}
+
+        for fruit_name, qty_str in waste_data.items():
+            qty_waste = float(qty_str)
+            if qty_waste > 0:
+                available = active_stock.get(fruit_name, 0.0)
+                if qty_waste > available:
+                    cursor.close()
+                    conn.close()
+                    return jsonify({"status": "error", "message": f"Cannot log {qty_waste} kg waste for {fruit_name}. Only {available} kg in stock."}), 400
+
         inserted = 0
-        for fruit_name, waste_kg in waste_data.items():
-            if fruit_name not in fruit_map or float(waste_kg) <= 0:
+        for fruit_name, waste_kg_str in waste_data.items():
+            waste_kg = float(waste_kg_str)
+            if fruit_name not in fruit_map or waste_kg <= 0:
                 continue
+            
+            fid = fruit_map[fruit_name]
             cursor.execute("""
                 INSERT INTO waste_log (user_id, fruit_id, waste_date, waste_kg)
                 VALUES (%s, %s, %s, %s)
-            """, (user_id, fruit_map[fruit_name], waste_date, float(waste_kg)))
+            """, (user_id, fid, waste_date, waste_kg))
+            
+            # Deduct from fruit_batches shelf stock
+            cursor.execute("""
+                SELECT batch_id, quantity_kg FROM fruit_batches 
+                WHERE user_id = %s AND fruit_id = %s AND is_active = 1
+                ORDER BY spoilage_date ASC
+            """, (user_id, fid))
+            
+            batches = cursor.fetchall()
+            remaining_to_deduct = waste_kg
+            for b in batches:
+                if remaining_to_deduct <= 0:
+                    break
+                deduct = min(b['quantity_kg'], remaining_to_deduct)
+                new_qty = b['quantity_kg'] - deduct
+                remaining_to_deduct -= deduct
+                
+                if new_qty <= 0:
+                    cursor.execute("UPDATE fruit_batches SET quantity_kg = 0, is_active = 0 WHERE batch_id = %s", (b['batch_id'],))
+                else:
+                    cursor.execute("UPDATE fruit_batches SET quantity_kg = %s WHERE batch_id = %s", (new_qty, b['batch_id']))
+
+            # Update daily_records so the ML model can see this waste
+            cursor.execute("""
+                SELECT record_id FROM daily_records 
+                WHERE user_id = %s AND fruit_id = %s AND date = %s
+            """, (user_id, fid, waste_date))
+            
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute("""
+                    UPDATE daily_records 
+                    SET waste_quantity = waste_quantity + %s
+                    WHERE record_id = %s
+                """, (waste_kg, existing['record_id']))
+            else:
+                cursor.execute("""
+                    INSERT INTO daily_records (user_id, fruit_id, date, quantity_sold, waste_quantity, starting_inventory, restock_quantity, end_of_day_stock) 
+                    VALUES (%s, %s, %s, 0, %s, 0, 0, 0)
+                """, (user_id, fid, waste_date, waste_kg))
+
+            inserted += 1
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"status": "success", "logged": inserted})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/update-sales', methods=['POST'])
+def update_sales():
+    try:
+        body = request.json or {}
+        user_id = body.get('user_id')
+        sales_data = body.get('sales_data', {})
+        sales_date_str = body.get('date', date.today().isoformat())
+
+        if not user_id:
+            return jsonify({"status": "error", "message": "user_id is required"}), 400
+
+        try:
+            sales_date = datetime.strptime(sales_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            sales_date = date.today()
+
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        # Get fruit ID map
+        cursor.execute("SELECT fruit_id, fruit_name FROM fruits")
+        fruit_map = {row['fruit_name']: row['fruit_id'] for row in cursor.fetchall()}
+
+        # Verify stock first
+        cursor.execute("""
+            SELECT f.fruit_name, SUM(b.quantity_kg) as stock
+            FROM fruit_batches b
+            JOIN fruits f ON b.fruit_id = f.fruit_id
+            WHERE b.user_id = %s AND b.is_active = 1
+            GROUP BY f.fruit_name
+        """, (user_id,))
+        active_stock = {row['fruit_name']: float(row['stock'] or 0) for row in cursor.fetchall()}
+
+        for fruit_name, qty_str in sales_data.items():
+            qty_sold = float(qty_str)
+            if qty_sold > 0:
+                available = active_stock.get(fruit_name, 0.0)
+                if qty_sold > available:
+                    cursor.close()
+                    conn.close()
+                    return jsonify({"status": "error", "message": f"Cannot log {qty_sold} kg sales for {fruit_name}. Only {available} kg in stock."}), 400
+
+        # Insert or update daily_records
+        inserted = 0
+        for fruit_name, qty_sold_str in sales_data.items():
+            qty_sold = float(qty_sold_str)
+            if fruit_name not in fruit_map or qty_sold <= 0:
+                continue
+            
+            fid = fruit_map[fruit_name]
+            
+            # Check if record exists for this date and fruit
+            cursor.execute("""
+                SELECT record_id FROM daily_records 
+                WHERE user_id = %s AND fruit_id = %s AND date = %s
+            """, (user_id, fid, sales_date))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                cursor.execute("""
+                    UPDATE daily_records 
+                    SET quantity_sold = quantity_sold + %s
+                    WHERE record_id = %s
+                """, (qty_sold, existing['record_id']))
+            else:
+                cursor.execute("""
+                    INSERT INTO daily_records (user_id, fruit_id, date, quantity_sold, waste_quantity, starting_inventory, restock_quantity, end_of_day_stock) 
+                    VALUES (%s, %s, %s, %s, 0, 0, 0, 0)
+                """, (user_id, fid, sales_date, qty_sold))
+                
+            # Also deduct from fruit_batches shelf stock to keep the pieChart and alert system accurate
+            # We can deduct the oldest batch first
+            cursor.execute("""
+                SELECT batch_id, quantity_kg FROM fruit_batches 
+                WHERE user_id = %s AND fruit_id = %s AND is_active = 1
+                ORDER BY spoilage_date ASC
+            """, (user_id, fid))
+            
+            batches = cursor.fetchall()
+            remaining_to_deduct = qty_sold
+            for b in batches:
+                if remaining_to_deduct <= 0:
+                    break
+                deduct = min(b['quantity_kg'], remaining_to_deduct)
+                new_qty = b['quantity_kg'] - deduct
+                remaining_to_deduct -= deduct
+                
+                if new_qty <= 0:
+                    cursor.execute("UPDATE fruit_batches SET quantity_kg = 0, is_active = 0 WHERE batch_id = %s", (b['batch_id'],))
+                else:
+                    cursor.execute("UPDATE fruit_batches SET quantity_kg = %s WHERE batch_id = %s", (new_qty, b['batch_id']))
+            
             inserted += 1
 
         conn.commit()
@@ -610,6 +835,39 @@ def waste_history():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
+@app.route('/api/sales-history', methods=['GET'])
+def sales_history():
+    """Returns last 7 days sales by fruit for bar chart."""
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({"status": "error", "message": "user_id required"}), 400
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT f.fruit_name, d.date, SUM(d.quantity_sold) as total_sales
+            FROM daily_records d
+            JOIN fruits f ON d.fruit_id = f.fruit_id
+            WHERE d.user_id = %s
+              AND d.date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+            GROUP BY f.fruit_name, d.date
+            ORDER BY d.date ASC
+        """, (user_id,))
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        result = []
+        for row in rows:
+            result.append({
+                "fruit": row['fruit_name'],
+                "date": row['date'].isoformat() if hasattr(row['date'], 'isoformat') else str(row['date']),
+                "sales_kg": float(row['total_sales'] or 0)
+            })
+        return jsonify({"status": "success", "data": result})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # ─── Bootstrap ────────────────────────────────────────────────────────────────
 if __name__ == '__main__':

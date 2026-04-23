@@ -25,8 +25,8 @@ const FRUIT_EMOJIS = {
 };
 
 const ALL_FRUITS = [
-  'Bananas','Apples','Oranges','Grapes','Mangoes',
-  'Papaya','Guava','Pomegranate','Watermelon','Custard Apple'
+  'Bananas', 'Apples', 'Oranges', 'Grapes', 'Mangoes',
+  'Papaya', 'Guava', 'Pomegranate', 'Watermelon', 'Custard Apple'
 ];
 
 const FESTIVALS = ['None', 'Diwali', 'Holi', 'Christmas', 'Navratri', 'Eid'];
@@ -49,11 +49,11 @@ function KpiCard({ title, value, icon: Icon, color }) {
 
 function ShelfBadge({ flag }) {
   const map = {
-    OK:            { cls: 'shelf-ok',      label: '✅ OK' },
-    EXPIRING_SOON: { cls: 'shelf-soon',    label: '⚠️ Soon' },
-    EXPIRING_TODAY:{ cls: 'shelf-today',   label: '🔴 Today' },
-    EXPIRED:       { cls: 'shelf-expired', label: '💀 Expired' },
-    NO_BATCH:      { cls: 'shelf-none',    label: '—' },
+    OK: { cls: 'shelf-ok', label: '✅ OK' },
+    EXPIRING_SOON: { cls: 'shelf-soon', label: '⚠️ Soon' },
+    EXPIRING_TODAY: { cls: 'shelf-today', label: '🔴 Today' },
+    EXPIRED: { cls: 'shelf-expired', label: '💀 Expired' },
+    NO_BATCH: { cls: 'shelf-none', label: '—' },
   };
   const { cls, label } = map[flag] || map.NO_BATCH;
   return <span className={`shelf-badge ${cls}`}>{label}</span>;
@@ -87,13 +87,13 @@ function OverviewTab({ user }) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   if (loading) return <div className="dash-loading"><RefreshCw className="spin" size={28} /><span>Loading overview…</span></div>;
-  if (error)   return <div className="dash-error"><AlertTriangle size={32}/><p>{error}</p><button className="btn btn-primary btn-sm" onClick={fetchData}>Retry</button></div>;
+  if (error) return <div className="dash-error"><AlertTriangle size={32} /><p>{error}</p><button className="btn btn-primary btn-sm" onClick={fetchData}>Retry</button></div>;
 
   const kpis = [
-    { title: 'Total Sales',   value: `${data?.kpis?.totalSales || 0} kg`,    icon: DollarSign, color: '#48a574' },
-    { title: 'Total Waste',   value: `${data?.kpis?.totalWaste || 0} kg`,    icon: Recycle,    color: '#ef4444' },
-    { title: 'Efficiency',    value: `${data?.kpis?.efficiency  || 0}%`,     icon: Target,     color: '#a855f7' },
-    { title: 'Vendor ID',     value: `#${user?.user_id}`,                    icon: Package,    color: '#3b82f6' },
+    { title: 'Total Sales', value: `${data?.kpis?.totalSales || 0} kg`, icon: DollarSign, color: '#48a574' },
+    { title: 'Total Waste', value: `${data?.kpis?.totalWaste || 0} kg`, icon: Recycle, color: '#ef4444' },
+    { title: 'Efficiency', value: `${data?.kpis?.efficiency || 0}%`, icon: Target, color: '#a855f7' },
+    { title: 'Vendor ID', value: `#${user?.user_id}`, icon: Package, color: '#3b82f6' },
   ];
 
   return (
@@ -110,7 +110,7 @@ function OverviewTab({ user }) {
           <div className="chart-card-header">
             <div>
               <div className="chart-card-title">Top Selling Fruits</div>
-              <div className="text-sm text-muted">All-time distribution</div>
+              <div className="text-sm text-muted">Last 7 days</div>
             </div>
           </div>
           {data?.pieData?.length > 0 ? (
@@ -143,8 +143,8 @@ function OverviewTab({ user }) {
         <div className="card chart-card wide inventory-card">
           <div className="chart-card-header">
             <div>
-              <div className="chart-card-title">Recent Stock Status</div>
-              <div className="text-sm text-muted">Last 10 records</div>
+              <div className="chart-card-title">Inventory Stock</div>
+              <div className="text-sm text-muted">Current active stock</div>
             </div>
             <button className="btn btn-ghost btn-sm" onClick={fetchData} id="refresh-overview-btn"><RefreshCw size={14} /></button>
           </div>
@@ -153,10 +153,7 @@ function OverviewTab({ user }) {
               <thead>
                 <tr>
                   <th>Product</th>
-                  <th>End Stock (kg)</th>
-                  <th>Waste</th>
-                  <th>Date</th>
-                  <th>Risk</th>
+                  <th>In Stock (kg)</th>
                 </tr>
               </thead>
               <tbody>
@@ -164,16 +161,9 @@ function OverviewTab({ user }) {
                   <tr key={i}>
                     <td className="product-name">{FRUIT_EMOJIS[item.product] || '🍑'} {item.product}</td>
                     <td>{item.stock ?? '—'}</td>
-                    <td>{item.waste_quantity ?? 0} kg</td>
-                    <td>{item.date}</td>
-                    <td>
-                      <span className={`risk-badge ${(item.wasteRisk || 'low').toLowerCase()}`}>
-                        {item.wasteRisk || 'Low'}
-                      </span>
-                    </td>
                   </tr>
                 )) : (
-                  <tr><td colSpan="5" className="empty-state">No inventory records found.</td></tr>
+                  <tr><td colSpan="2" className="empty-state">No active inventory found.</td></tr>
                 )}
               </tbody>
             </table>
@@ -205,32 +195,38 @@ function OverviewTab({ user }) {
 
 // ─── TAB 2: Today's Prediction ────────────────────────────────────────────────
 function PredictionTab({ user }) {
-  const [festival, setFestival] = useState('None');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [forceRefreshing, setForceRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [purchaseQty, setPurchaseQty] = useState({});
   const [purchaseSuccess, setPurchaseSuccess] = useState(false);
   const [recordingPurchase, setRecordingPurchase] = useState(false);
 
-  const fetchPrediction = useCallback(async () => {
+  const fetchPrediction = useCallback(async (force = false) => {
     setLoading(true);
+    if (force) setForceRefreshing(true);
     setError(null);
     setPurchaseSuccess(false);
     try {
       const res = await fetch(`${API}/api/predict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user?.user_id, festival })
+        body: JSON.stringify({ user_id: user?.user_id, force_refresh: force })
       });
       const json = await res.json();
       if (json.status === 'success') {
         setData(json);
-        // Pre-fill modal quantities with recommendations
-        const initQty = {};
-        Object.entries(json.recommendations || {}).forEach(([f, q]) => { initQty[f] = q; });
-        setPurchaseQty(initQty);
+        // Initialize modal quantities to 0 as requested
+        setPurchaseQty(prev => {
+          if (Object.keys(prev).length === 0 || force) {
+            const zeroQty = {};
+            ALL_FRUITS.forEach(f => { zeroQty[f] = 0; });
+            return zeroQty;
+          }
+          return prev;
+        });
       } else {
         setError(json.message || 'Prediction failed.');
       }
@@ -238,15 +234,26 @@ function PredictionTab({ user }) {
       setError('Cannot reach the server. Is Flask running?');
     } finally {
       setLoading(false);
+      setForceRefreshing(false);
     }
-  }, [user?.user_id, festival]);
+  }, [user?.user_id]);
 
   useEffect(() => { fetchPrediction(); }, []); // auto-load once
 
   const handleRecordPurchase = async () => {
     setRecordingPurchase(true);
     try {
-      const fruits = Object.keys(purchaseQty).filter(f => parseFloat(purchaseQty[f]) > 0);
+      const fruits = Object.keys(purchaseQty).filter(f => {
+        const qty = parseFloat(purchaseQty[f]);
+        return !isNaN(qty) && qty > 0;
+      });
+
+      if (fruits.length === 0) {
+        alert('Please enter a quantity greater than 0 for at least one fruit.');
+        setRecordingPurchase(false);
+        return;
+      }
+
       const res = await fetch(`${API}/api/record-purchase`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -256,56 +263,54 @@ function PredictionTab({ user }) {
       if (json.status === 'success') {
         setPurchaseSuccess(true);
         setShowModal(false);
-        // Re-fetch to update shelf status
-        fetchPrediction();
+
+        const zeroQty = {};
+        Object.keys(purchaseQty).forEach(f => zeroQty[f] = 0);
+        setPurchaseQty(zeroQty);
+
+        // Re-fetch to update shelf status and best fruit prediction
+        setTimeout(() => fetchPrediction(false), 500);
+      } else {
+        alert(json.message || 'Failed to record purchase.');
       }
     } catch (e) {
-      alert('Failed to record purchase.');
+      alert('Failed to record purchase. Please check your network connection.');
     } finally {
       setRecordingPurchase(false);
     }
   };
 
   const weatherIcon = (cond) => {
-    if (!cond) return <Cloud size={16}/>;
+    if (!cond) return <Cloud size={16} />;
     const c = cond.toLowerCase();
     if (c.includes('sunny')) return <Sun size={16} style={{ color: '#eab308' }} />;
-    if (c.includes('rain'))  return <Droplets size={16} style={{ color: '#3b82f6' }} />;
+    if (c.includes('rain')) return <Droplets size={16} style={{ color: '#3b82f6' }} />;
     return <Cloud size={16} style={{ color: '#94a3b8' }} />;
   };
 
   return (
     <div className="tab-content">
-      {/* Controls bar */}
-      <div className="card prediction-controls">
-        <div className="pred-ctrl-group">
-          <label className="form-label">Festival / Holiday</label>
-          <select className="form-control" style={{ maxWidth: 200 }}
-            value={festival} onChange={e => setFestival(e.target.value)} id="festival-select">
-            {FESTIVALS.map(f => <option key={f} value={f}>{f}</option>)}
-          </select>
-        </div>
-        <button className="btn btn-primary btn-sm" onClick={fetchPrediction} disabled={loading} id="run-prediction-btn">
-          {loading ? <span className="spinner" /> : <><Brain size={14} /> Run Prediction</>}
-        </button>
-      </div>
 
       {error && (
         <div className="dash-error">
-          <AlertTriangle size={28}/><p>{error}</p>
-          <button className="btn btn-primary btn-sm" onClick={fetchPrediction}>Retry</button>
+          <AlertTriangle size={28} /><p>{error}</p>
+          <button className="btn btn-primary btn-sm" onClick={() => fetchPrediction(false)}>Retry</button>
         </div>
       )}
 
-      {loading && !data && (
-        <div className="dash-loading"><RefreshCw className="spin" size={28}/><span>Running ML models…</span></div>
+      {loading && !data && !forceRefreshing && (
+        <div className="dash-loading"><RefreshCw className="spin" size={28} /><span>Loading data…</span></div>
+      )}
+
+      {loading && forceRefreshing && (
+        <div className="dash-loading"><RefreshCw className="spin" size={28} /><span>Running fresh ML models…</span></div>
       )}
 
       {data && (
         <>
           {purchaseSuccess && (
             <div className="purchase-success-banner">
-              <CheckCircle size={18}/> Purchase recorded successfully! Shelf tracking updated.
+              <CheckCircle size={18} /> Purchase recorded successfully! Shelf tracking updated.
             </div>
           )}
 
@@ -317,11 +322,11 @@ function PredictionTab({ user }) {
             <div className="ctx-sep" />
             <div className="ctx-item"><span className="ctx-label">Season</span><strong>{data.season}</strong></div>
             <div className="ctx-sep" />
-            <div className="ctx-item">{weatherIcon(data.weather?.condition)}<span className="ctx-label" style={{marginLeft:6}}>Weather</span><strong>{data.weather?.condition}</strong></div>
+            <div className="ctx-item">{weatherIcon(data.weather?.condition)}<span className="ctx-label" style={{ marginLeft: 6 }}>Weather</span><strong>{data.weather?.condition}</strong></div>
             <div className="ctx-sep" />
-            <div className="ctx-item"><Thermometer size={14} style={{color:'#ef4444'}}/><strong>{data.weather?.temperature_c}°C</strong></div>
+            <div className="ctx-item"><Thermometer size={14} style={{ color: '#ef4444' }} /><strong>{data.weather?.temperature_c}°C</strong></div>
             <div className="ctx-sep" />
-            <div className="ctx-item"><Droplets size={14} style={{color:'#3b82f6'}}/><strong>{data.weather?.humidity}%</strong></div>
+            <div className="ctx-item"><Droplets size={14} style={{ color: '#3b82f6' }} /><strong>{data.weather?.humidity}%</strong></div>
             <div className="ctx-sep" />
             <div className="ctx-item"><span className="ctx-label">Weekend</span><strong>{data.is_weekend}</strong></div>
           </div>
@@ -400,6 +405,15 @@ function PredictionTab({ user }) {
               </table>
             </div>
           </div>
+
+          <div style={{ marginTop: 20, textAlign: 'center' }}>
+            <button className="btn btn-primary btn-sm" onClick={() => fetchPrediction(true)} disabled={forceRefreshing} id="run-prediction-btn">
+              {forceRefreshing ? <span className="spinner" /> : <><Brain size={14} /> Force Fresh Prediction</>}
+            </button>
+            <p className="text-xs text-muted" style={{ marginTop: 8 }}>
+              Predictions are automatically cached daily. Use this to bypass the cache.
+            </p>
+          </div>
         </>
       )}
 
@@ -409,9 +423,9 @@ function PredictionTab({ user }) {
           <div className="modal-box" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="font-display">Confirm Today's Purchase</h3>
-              <button className="modal-close" onClick={() => setShowModal(false)} id="close-modal-btn"><X size={18}/></button>
+              <button className="modal-close" onClick={() => setShowModal(false)} id="close-modal-btn"><X size={18} /></button>
             </div>
-            <p className="text-sm text-muted" style={{ marginBottom: 16 }}>
+            <p className="text-sm text-muted" style={{ marginBottom: 16, textAlign: 'center' }}>
               Adjust quantities as needed. These will be saved as new batches.
             </p>
             <div className="modal-body">
@@ -421,11 +435,11 @@ function PredictionTab({ user }) {
                   <input
                     type="number"
                     min="0"
-                    step="0.5"
+                    step="any"
                     className="form-control modal-qty-input"
                     value={purchaseQty[fruit] ?? 0}
                     onChange={e => setPurchaseQty(q => ({ ...q, [fruit]: parseFloat(e.target.value) || 0 }))}
-                    id={`purchase-qty-${fruit.replace(/\s+/g,'-').toLowerCase()}`}
+                    id={`purchase-qty-${fruit.replace(/\s+/g, '-').toLowerCase()}`}
                   />
                   <span className="text-sm text-muted">kg</span>
                 </div>
@@ -435,7 +449,7 @@ function PredictionTab({ user }) {
               <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>Cancel</button>
               <button className="btn btn-primary btn-sm" onClick={handleRecordPurchase}
                 disabled={recordingPurchase} id="confirm-purchase-btn">
-                {recordingPurchase ? <span className="spinner"/> : <><CheckCircle size={14}/> Confirm Purchase</>}
+                {recordingPurchase ? <span className="spinner" /> : <><CheckCircle size={14} /> Confirm Purchase</>}
               </button>
             </div>
           </div>
@@ -445,50 +459,84 @@ function PredictionTab({ user }) {
   );
 }
 
-// ─── TAB 3: Waste Tracking ────────────────────────────────────────────────────
-function WasteTab({ user }) {
+// ─── TAB 3: End of Day Logging ────────────────────────────────────────────────────
+function EndOfDayTab({ user }) {
   const [wasteForm, setWasteForm] = useState(
     Object.fromEntries(ALL_FRUITS.map(f => [f, '']))
   );
-  const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [salesForm, setSalesForm] = useState(
+    Object.fromEntries(ALL_FRUITS.map(f => [f, '']))
+  );
+  const [submittingWaste, setSubmittingWaste] = useState(false);
+  const [submittingSales, setSubmittingSales] = useState(false);
+  const [wasteSuccess, setWasteSuccess] = useState(false);
+  const [salesSuccess, setSalesSuccess] = useState(false);
   const [histLoading, setHistLoading] = useState(true);
   const [histData, setHistData] = useState([]);
+  const [salesHistLoading, setSalesHistLoading] = useState(true);
+  const [salesHistData, setSalesHistData] = useState([]);
 
   const today = new Date().toISOString().slice(0, 10);
 
   const fetchHistory = useCallback(async () => {
     if (!user?.user_id) return;
     setHistLoading(true);
+    setSalesHistLoading(true);
     try {
-      const res = await fetch(`${API}/api/waste-history?user_id=${user.user_id}`);
-      const json = await res.json();
-      if (json.status === 'success') {
-        // Aggregate by fruit for bar chart
-        const agg = {};
-        json.data.forEach(row => {
-          if (!agg[row.fruit]) agg[row.fruit] = 0;
-          agg[row.fruit] += row.waste_kg;
+      // Fetch waste history
+      const resWaste = await fetch(`${API}/api/waste-history?user_id=${user.user_id}`);
+      const jsonWaste = await resWaste.json();
+      if (jsonWaste.status === 'success') {
+        const aggW = {};
+        jsonWaste.data.forEach(row => {
+          if (!aggW[row.fruit]) aggW[row.fruit] = 0;
+          aggW[row.fruit] += row.waste_kg;
         });
-        setHistData(Object.entries(agg).map(([name, waste]) => ({
+        setHistData(Object.entries(aggW).map(([name, waste]) => ({
           name: `${FRUIT_EMOJIS[name] || ''} ${name}`,
           waste: Math.round(waste * 10) / 10
-        })).sort((a,b) => b.waste - a.waste));
+        })).sort((a, b) => b.waste - a.waste));
       }
-    } catch(e) {}
-    finally { setHistLoading(false); }
+
+      // Fetch sales history
+      const resSales = await fetch(`${API}/api/sales-history?user_id=${user.user_id}`);
+      const jsonSales = await resSales.json();
+      if (jsonSales.status === 'success') {
+        const aggS = {};
+        jsonSales.data.forEach(row => {
+          if (!aggS[row.fruit]) aggS[row.fruit] = 0;
+          aggS[row.fruit] += row.sales_kg;
+        });
+        setSalesHistData(Object.entries(aggS).map(([name, sales]) => ({
+          name: `${FRUIT_EMOJIS[name] || ''} ${name}`,
+          sales: Math.round(sales * 10) / 10
+        })).sort((a, b) => b.sales - a.sales));
+      }
+    } catch (e) { }
+    finally {
+      setHistLoading(false);
+      setSalesHistLoading(false);
+    }
   }, [user?.user_id]);
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
-  const handleSubmit = async e => {
+  const handleWasteSubmit = async e => {
     e.preventDefault();
-    setSubmitting(true);
-    setSuccess(false);
+    setSubmittingWaste(true);
+    setWasteSuccess(false);
     const waste_data = {};
     Object.entries(wasteForm).forEach(([f, v]) => {
-      if (v !== '' && parseFloat(v) > 0) waste_data[f] = parseFloat(v);
+      const parsed = parseFloat(v);
+      if (!isNaN(parsed) && parsed > 0) waste_data[f] = parsed;
     });
+
+    if (Object.keys(waste_data).length === 0) {
+      alert('Please enter waste quantity for at least one fruit.');
+      setSubmittingWaste(false);
+      return;
+    }
+
     try {
       const res = await fetch(`${API}/api/update-waste`, {
         method: 'POST',
@@ -497,23 +545,100 @@ function WasteTab({ user }) {
       });
       const json = await res.json();
       if (json.status === 'success') {
-        setSuccess(true);
+        setWasteSuccess(true);
         setWasteForm(Object.fromEntries(ALL_FRUITS.map(f => [f, ''])));
         fetchHistory();
+      } else {
+        alert(json.message || 'Failed to submit waste data');
       }
-    } catch(e) { alert('Failed to submit waste data.'); }
-    finally { setSubmitting(false); }
+    } catch (e) { alert('Failed to submit waste data.'); }
+    finally { setSubmittingWaste(false); }
+  };
+
+  const handleSalesSubmit = async e => {
+    e.preventDefault();
+    setSubmittingSales(true);
+    setSalesSuccess(false);
+    const sales_data = {};
+    Object.entries(salesForm).forEach(([f, v]) => {
+      const parsed = parseFloat(v);
+      if (!isNaN(parsed) && parsed > 0) sales_data[f] = parsed;
+    });
+
+    if (Object.keys(sales_data).length === 0) {
+      alert('Please enter sales quantity for at least one fruit.');
+      setSubmittingSales(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API}/api/update-sales`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user?.user_id, sales_data, date: today })
+      });
+      const json = await res.json();
+      if (json.status === 'success') {
+        setSalesSuccess(true);
+        setSalesForm(Object.fromEntries(ALL_FRUITS.map(f => [f, ''])));
+      } else {
+        alert(json.message || 'Failed to submit sales data');
+      }
+    } catch (e) { alert('Failed to submit sales data.'); }
+    finally { setSubmittingSales(false); }
   };
 
   return (
-    <div className="tab-content">
-      {success && (
-        <div className="purchase-success-banner">
-          <CheckCircle size={18}/> Waste data logged successfully for {today}.
+    <div className="tab-content end-of-day-tab">
+      {(wasteSuccess || salesSuccess) && (
+        <div className="purchase-success-banner" style={{ marginBottom: 16 }}>
+          <CheckCircle size={18} />
+          {wasteSuccess && salesSuccess ? "Both Sales and Waste logs were recorded successfully." :
+            wasteSuccess ? `Waste data logged successfully for ${today}.` :
+              `Sales data logged successfully for ${today}.`}
         </div>
       )}
 
-      <div className="charts-row" style={{ gridTemplateColumns: '1fr 1.5fr' }}>
+      <div className="charts-row" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
+        {/* Sales form */}
+        <div className="card chart-card">
+          <div className="chart-card-header">
+            <div>
+              <div className="chart-card-title">Log Today's Sales</div>
+              <div className="text-sm text-muted">{today}</div>
+            </div>
+            <DollarSign size={20} style={{ color: '#48a574' }} />
+          </div>
+          <form onSubmit={handleSalesSubmit} id="sales-form">
+            <div className="waste-form-grid" style={{ gridTemplateColumns: '1fr', gap: 12 }}>
+              {ALL_FRUITS.map(fruit => (
+                <div key={fruit} className="waste-form-row">
+                  <label className="waste-form-label" style={{ minWidth: 100 }}>
+                    {FRUIT_EMOJIS[fruit]} {fruit}
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      className="form-control waste-input"
+                      placeholder="0"
+                      value={salesForm[fruit]}
+                      onChange={e => setSalesForm(f => ({ ...f, [fruit]: e.target.value }))}
+                      id={`sales-${fruit.replace(/\s+/g, '-').toLowerCase()}`}
+                      style={{ width: '100%' }}
+                    />
+                    <span className="text-sm text-muted" style={{ minWidth: 20 }}>kg</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 16 }}
+              disabled={submittingSales} id="submit-sales-btn">
+              {submittingSales ? <span className="spinner" /> : <><DollarSign size={14} /> Submit Sales Log</>}
+            </button>
+          </form>
+        </div>
         {/* Waste form */}
         <div className="card chart-card">
           <div className="chart-card-header">
@@ -522,37 +647,66 @@ function WasteTab({ user }) {
               <div className="text-sm text-muted">{today}</div>
             </div>
           </div>
-          <form onSubmit={handleSubmit} id="waste-form">
-            <div className="waste-form-grid">
+          <form onSubmit={handleWasteSubmit} id="waste-form">
+            <div className="waste-form-grid" style={{ gridTemplateColumns: '1fr', gap: 12 }}>
               {ALL_FRUITS.map(fruit => (
                 <div key={fruit} className="waste-form-row">
-                  <label className="waste-form-label">
+                  <label className="waste-form-label" style={{ minWidth: 100 }}>
                     {FRUIT_EMOJIS[fruit]} {fruit}
                   </label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
                     <input
                       type="number"
                       min="0"
-                      step="0.1"
+                      step="any"
                       className="form-control waste-input"
                       placeholder="0"
                       value={wasteForm[fruit]}
                       onChange={e => setWasteForm(f => ({ ...f, [fruit]: e.target.value }))}
-                      id={`waste-${fruit.replace(/\s+/g,'-').toLowerCase()}`}
+                      id={`waste-${fruit.replace(/\s+/g, '-').toLowerCase()}`}
+                      style={{ width: '100%' }}
                     />
-                    <span className="text-sm text-muted">kg</span>
+                    <span className="text-sm text-muted" style={{ minWidth: 20 }}>kg</span>
                   </div>
                 </div>
               ))}
             </div>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 16 }}
-              disabled={submitting} id="submit-waste-btn">
-              {submitting ? <span className="spinner"/> : <><Recycle size={14}/> Submit Waste Log</>}
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 16, background: '#ef4444', borderColor: '#ef4444' }}
+              disabled={submittingWaste} id="submit-waste-btn">
+              {submittingWaste ? <span className="spinner" /> : <><Recycle size={14} /> Submit Waste Log</>}
             </button>
           </form>
         </div>
+      </div>
 
-        {/* Bar chart */}
+      {/* Charts (moved below forms) */}
+      <div className="charts-row" style={{ marginTop: 24, gridTemplateColumns: '1fr 1fr' }}>
+        {/* Sales Bar Chart */}
+        <div className="card chart-card">
+          <div className="chart-card-header">
+            <div>
+              <div className="chart-card-title">Sales by Fruit</div>
+              <div className="text-sm text-muted">Last 7 days (kg)</div>
+            </div>
+          </div>
+          {salesHistLoading ? (
+            <div className="dash-loading"><RefreshCw className="spin" size={22} /></div>
+          ) : salesHistData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={salesHistData} margin={{ left: 0, right: 16, top: 8, bottom: 60 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} angle={-35} textAnchor="end" interval={0} />
+                <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
+                <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 10 }} />
+                <Bar dataKey="sales" name="Sales (kg)" fill="#48a574" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="empty-state">No sales data for the last 7 days.</div>
+          )}
+        </div>
+
+        {/* Waste Bar Chart */}
         <div className="card chart-card">
           <div className="chart-card-header">
             <div>
@@ -561,7 +715,7 @@ function WasteTab({ user }) {
             </div>
           </div>
           {histLoading ? (
-            <div className="dash-loading"><RefreshCw className="spin" size={22}/></div>
+            <div className="dash-loading"><RefreshCw className="spin" size={22} /></div>
           ) : histData.length > 0 ? (
             <ResponsiveContainer width="100%" height={320}>
               <BarChart data={histData} margin={{ left: 0, right: 16, top: 8, bottom: 60 }}>
@@ -569,7 +723,7 @@ function WasteTab({ user }) {
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} angle={-35} textAnchor="end" interval={0} />
                 <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
                 <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 10 }} />
-                <Bar dataKey="waste" name="Waste (kg)" fill="#ef4444" radius={[4,4,0,0]} />
+                <Bar dataKey="waste" name="Waste (kg)" fill="#ef4444" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -592,9 +746,9 @@ export default function DashboardPage() {
   const handleLogout = () => { logout(); navigate('/'); };
 
   const tabs = [
-    { id: 'overview',    label: 'Overview',           icon: LayoutDashboard },
-    { id: 'prediction',  label: "Today's Prediction",  icon: Brain           },
-    { id: 'waste',       label: 'Waste Tracking',      icon: Recycle         },
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'prediction', label: "Today's Prediction", icon: Brain },
+    { id: 'waste', label: 'End of Day Log', icon: Recycle },
   ];
 
   return (
@@ -604,10 +758,10 @@ export default function DashboardPage() {
       <aside className={`sidebar glass ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div className="logo-icon"><Leaf size={18}/></div>
+            <div className="logo-icon"><Leaf size={18} /></div>
             <span className="sidebar-brand-text font-display">Local<span className="text-gradient">Fresh</span></span>
           </div>
-          <button className="sidebar-close" onClick={() => setSidebarOpen(false)}><X size={16}/></button>
+          <button className="sidebar-close" onClick={() => setSidebarOpen(false)}><X size={16} /></button>
         </div>
 
         <nav className="sidebar-nav">
@@ -618,7 +772,7 @@ export default function DashboardPage() {
               onClick={() => { setActiveTab(tab.id); setSidebarOpen(false); }}
               id={`tab-${tab.id}`}
             >
-              <tab.icon size={18}/> {tab.label}
+              <tab.icon size={18} /> {tab.label}
             </button>
           ))}
         </nav>
@@ -632,7 +786,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <button className="logout-btn" onClick={handleLogout} title="Logout" id="logout-btn">
-            <LogOut size={16}/>
+            <LogOut size={16} />
           </button>
         </div>
       </aside>
@@ -643,7 +797,7 @@ export default function DashboardPage() {
         <div className="topbar glass">
           <div className="topbar-left">
             <button className="sidebar-toggle" onClick={() => setSidebarOpen(o => !o)} id="sidebar-toggle-btn">
-              <Menu size={22}/>
+              <Menu size={22} />
             </button>
             <div>
               <div className="topbar-title">
@@ -667,9 +821,9 @@ export default function DashboardPage() {
 
         {/* Content */}
         <div className="dashboard-content">
-          {activeTab === 'overview'   && <OverviewTab   user={user} />}
+          {activeTab === 'overview' && <OverviewTab user={user} />}
           {activeTab === 'prediction' && <PredictionTab user={user} />}
-          {activeTab === 'waste'      && <WasteTab      user={user} />}
+          {activeTab === 'waste' && <EndOfDayTab user={user} />}
         </div>
       </main>
     </div>
