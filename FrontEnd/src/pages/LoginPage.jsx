@@ -46,7 +46,7 @@ export default function LoginPage() {
       const data = await response.json();
 
       if (data.status === "success") {
-        if (email == data.email) {
+        if (form.email == data.email) {
           login({
             user_name: data.user_name,
             email: data.email || form.email,

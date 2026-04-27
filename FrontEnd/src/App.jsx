@@ -22,10 +22,7 @@ const ProtectedRoute = ({ children }) => {
 
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('wr_user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -36,12 +33,10 @@ export default function App() {
 
   const login = (userData) => {
     setUser(userData);
-    localStorage.setItem('wr_user', JSON.stringify(userData));
   };
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem('wr_user');
   };
 
   return (
