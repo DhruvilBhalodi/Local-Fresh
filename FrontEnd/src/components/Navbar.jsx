@@ -36,7 +36,6 @@ export default function Navbar() {
         <div className="navbar-links hide-mobile">
           <a href="#features" className="nav-link">Features</a>
           <a href="#how-it-works" className="nav-link">How It Works</a>
-          <a href="#pricing" className="nav-link">Pricing</a>
         </div>
 
         {/* Desktop Actions */}
