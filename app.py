@@ -6,6 +6,7 @@ import joblib
 import numpy as np
 from datetime import datetime, timedelta, date
 import os
+import requests as http_requests
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
@@ -168,7 +169,7 @@ FRUIT_EMOJIS = {
     'Watermelon': '🍉', 'Custard Apple': '💚'
 }
 
-SEASONS = {0: 'Winter', 1: 'Spring', 2: 'Monsoon', 3: 'Autumn'}
+SEASONS = {0: 'Winter', 1: 'Summer', 2: 'Monsoon', 3: 'Autumn'}
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 def safe_encode(encoder, value):
@@ -179,11 +180,31 @@ def safe_encode(encoder, value):
 
 def get_season(month):
     if month in [12, 1, 2]: return 0   # Winter
-    if month in [3, 4, 5]: return 1    # Spring
+    if month in [3, 4, 5]: return 1    # Summer (pre-monsoon / hot season in India)
     if month in [6, 7, 8]: return 2    # Monsoon
-    return 3                            # Autumn
+    return 3                            # Autumn (post-monsoon)
 
-def get_mock_weather(month):
+# ─── OpenWeatherMap config ────────────────────────────────────────────────────
+OWM_API_KEY = 'aed7af0dfac764c8966b3af33535f01d'
+OWM_CITY    = 'Vadodara'
+OWM_COUNTRY = 'IN'
+OWM_URL     = 'https://api.openweathermap.org/data/2.5/weather'
+
+def _owm_condition_to_category(owm_id):
+    """Map OpenWeatherMap condition ID to the Sunny/Cloudy/Rainy category."""
+    # OWM IDs: 2xx=Thunderstorm, 3xx=Drizzle, 5xx=Rain, 6xx=Snow, 7xx=Atmosphere, 800=Clear, 80x=Clouds
+    if owm_id == 800:
+        return 'Sunny'
+    if owm_id in range(801, 805):
+        return 'Cloudy'
+    if owm_id in range(200, 622):
+        return 'Rainy'
+    if owm_id in range(700, 800):
+        return 'Cloudy'  # Mist, haze, fog, etc.
+    return 'Sunny'
+
+def _mock_weather_fallback(month):
+    """Seasonal fallback used when the live API is unreachable."""
     seasonal = {
         12: ('Sunny', 22, 60, 0), 1: ('Sunny', 20, 62, 0), 2: ('Sunny', 23, 58, 0),
         3: ('Sunny', 28, 55, 0), 4: ('Sunny', 32, 50, 0), 5: ('Cloudy', 35, 60, 0),
@@ -193,10 +214,54 @@ def get_mock_weather(month):
     w, t, h, p = seasonal.get(month, ('Sunny', 28, 65, 0))
     return {'weather_condition': w, 'temperature_c': t, 'humidity': h, 'precipitation_mm': p}
 
+def get_live_weather():
+    """Fetch real-time weather for Vadodara from OpenWeatherMap.
+    Returns a dict with weather_condition, temperature_c, humidity, precipitation_mm.
+    Falls back to seasonal mock data if the request fails.
+    """
+    try:
+        resp = http_requests.get(
+            OWM_URL,
+            params={
+                'q': f'{OWM_CITY},{OWM_COUNTRY}',
+                'appid': OWM_API_KEY,
+                'units': 'metric'
+            },
+            timeout=5
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        owm_id      = data['weather'][0]['id']
+        condition   = _owm_condition_to_category(owm_id)
+        temperature = round(data['main']['temp'], 1)
+        humidity    = data['main']['humidity']
+        # OWM only provides rain volume in 'rain' key (optional)
+        rain_1h     = data.get('rain', {}).get('1h', 0.0)
+
+        return {
+            'weather_condition': condition,
+            'temperature_c':     temperature,
+            'humidity':          humidity,
+            'precipitation_mm':  rain_1h,
+            # Extra metadata for transparency
+            'owm_description':   data['weather'][0]['description'].title(),
+            'source':            'live'
+        }
+    except Exception as e:
+        # Graceful fallback so the prediction endpoint always works
+        month = datetime.now().month
+        fallback = _mock_weather_fallback(month)
+        fallback['source'] = 'fallback'
+        return fallback
+
+# Keep the old name as an alias so get_day_context still works unchanged
+def get_mock_weather(month):
+    return get_live_weather()
+
 def get_day_context(date_obj):
     """Returns weather and festival context for a date"""
-    month = date_obj.month
-    weather = get_mock_weather(month)
+    weather = get_live_weather()
     
     # Simple festival mock logic
     festivals = {
@@ -210,10 +275,10 @@ def get_day_context(date_obj):
     fest = festivals.get((date_obj.month, date_obj.day), "None")
     
     return {
-        'weather_condition': weather['weather_condition'],
-        'max_temp_c': weather['temperature_c'],
+        'weather_condition':  weather['weather_condition'],
+        'max_temp_c':         weather['temperature_c'],
         'humidity_percentage': weather['humidity'],
-        'precipitation_mm': weather['precipitation_mm']
+        'precipitation_mm':   weather['precipitation_mm']
     }
 
 def json_serial(obj):
@@ -310,15 +375,19 @@ def predict():
         is_festival = 0 if festival in ['None', '', None] else 1
 
         # ── Weather ──
-        if use_live_weather or not custom_weather:
-            weather = get_mock_weather(month)
-        else:
+        if custom_weather:
+            # Manual override (e.g. for testing)
             weather = {
                 'weather_condition': custom_weather.get('weather_condition', 'Sunny'),
-                'temperature_c': custom_weather.get('temperature_c', 30),
-                'humidity': custom_weather.get('humidity', 65),
-                'precipitation_mm': custom_weather.get('precipitation_mm', 0)
+                'temperature_c':     custom_weather.get('temperature_c', 30),
+                'humidity':          custom_weather.get('humidity', 65),
+                'precipitation_mm':  custom_weather.get('precipitation_mm', 0),
+                'owm_description':   custom_weather.get('weather_condition', 'Sunny'),
+                'source':            'custom'
             }
+        else:
+            # Always use live OpenWeatherMap data (falls back to seasonal mock if offline)
+            weather = get_live_weather()
 
         w_cond = weather['weather_condition']
         temp = float(weather['temperature_c'])
@@ -447,10 +516,12 @@ def predict():
             "status": "success",
             "date": today.strftime('%Y-%m-%d'),
             "weather": {
-                "condition": w_cond,
+                "condition":     w_cond,
                 "temperature_c": temp,
-                "humidity": humidity,
-                "precipitation_mm": precip
+                "humidity":      humidity,
+                "precipitation_mm": precip,
+                "description":   weather.get('owm_description', w_cond),
+                "source":        weather.get('source', 'live')
             },
             "season": season_name,
             "day_of_week": day_of_week,
@@ -500,6 +571,65 @@ def get_dashboard_data():
         conn = get_db()
         cursor = conn.cursor(dictionary=True)
 
+        # 0. Auto-detect and log newly expired stock as waste (Run this first so charts are accurate)
+        # We find batches that are either:
+        # a) Still active but spoilage date has passed
+        # b) Already inactive (expired) but still have quantity_kg > 0 (orphaned stock)
+        cursor.execute("""
+            SELECT batch_id, fruit_id, quantity_kg, spoilage_date
+            FROM fruit_batches
+            WHERE user_id = %s AND (
+                (is_active = 1 AND spoilage_date < CURDATE()) OR
+                (is_active = 0 AND spoilage_date < CURDATE() AND quantity_kg > 0)
+            )
+        """, (user_id,))
+        expired_batches = cursor.fetchall()
+
+        if expired_batches:
+            # We'll log these as waste for today
+            today_dt = date.today()
+            ctx = get_day_context(today_dt)
+            
+            for b in expired_batches:
+                fid = b['fruit_id']
+                qty = float(b['quantity_kg'] or 0)
+                if qty <= 0: continue
+
+                # 1. Record in waste_log
+                cursor.execute("""
+                    INSERT INTO waste_log (user_id, fruit_id, waste_date, waste_kg)
+                    VALUES (%s, %s, %s, %s)
+                """, (user_id, fid, today_dt, qty))
+
+                # 2. Update daily_records for the chart/ML model
+                cursor.execute("""
+                    SELECT record_id FROM daily_records 
+                    WHERE user_id = %s AND fruit_id = %s AND date = %s
+                """, (user_id, fid, today_dt))
+                existing = cursor.fetchone()
+
+                if existing:
+                    cursor.execute("""
+                        UPDATE daily_records 
+                        SET waste_quantity = waste_quantity + %s
+                        WHERE record_id = %s
+                    """, (qty, existing['record_id']))
+                else:
+                    cursor.execute("""
+                        INSERT INTO daily_records (user_id, fruit_id, date, quantity_sold, waste_quantity, 
+                                                 starting_inventory, restock_quantity, end_of_day_stock,
+                                                 weather_condition, max_temp_c, humidity_percentage, precipitation_mm) 
+                        VALUES (%s, %s, %s, 0, %s, 0, 0, 0, %s, %s, %s, %s)
+                    """, (user_id, fid, today_dt, qty, ctx['weather_condition'], ctx['max_temp_c'], ctx['humidity_percentage'], ctx['precipitation_mm']))
+            
+            # 3. Mark the batches as inactive AND clear the quantity so we don't process them again
+            cursor.execute("""
+                UPDATE fruit_batches 
+                SET is_active = 0, quantity_kg = 0
+                WHERE user_id = %s AND spoilage_date < CURDATE()
+            """, (user_id,))
+            conn.commit()
+
         # 1. KPIs
         cursor.execute("""
             SELECT
@@ -544,31 +674,22 @@ def get_dashboard_data():
         for row in waste_pie_data:
             row['value'] = float(row['value'] or 0)
 
-        # 3a. Auto-deduct expired stock from active inventory
-        # Mark batches as inactive (is_active=0) if spoilage_date has passed
-        cursor.execute("""
-            UPDATE fruit_batches 
-            SET is_active = 0 
-            WHERE user_id = %s AND is_active = 1 AND spoilage_date < CURDATE()
-        """, (user_id,))
-        conn.commit()
 
         # 3b. Fetch inventory (Active vs Expired) with First-to-Expire info
         # We fetch the earliest expiry date and the total quantity expiring on that specific date.
         cursor.execute("""
             SELECT f.fruit_name as product, 
-                   SUM(CASE WHEN b.is_active = 1 THEN b.quantity_kg ELSE 0 END) as active_stock,
-                   SUM(CASE WHEN b.is_active = 0 AND b.spoilage_date < CURDATE() AND b.quantity_kg > 0 THEN b.quantity_kg ELSE 0 END) as expired_stock,
+                   COALESCE(SUM(CASE WHEN b.is_active = 1 THEN b.quantity_kg ELSE 0 END), 0) as active_stock,
+                   COALESCE(SUM(CASE WHEN b.is_active = 0 AND b.spoilage_date < CURDATE() AND b.quantity_kg > 0 THEN b.quantity_kg ELSE 0 END), 0) as expired_stock,
                    (SELECT MIN(spoilage_date) FROM fruit_batches WHERE user_id = %s AND fruit_id = f.fruit_id AND is_active = 1) as next_expiry_date,
                    (SELECT SUM(quantity_kg) FROM fruit_batches WHERE user_id = %s AND fruit_id = f.fruit_id AND is_active = 1 
-                    AND spoilage_date = (SELECT MIN(spoilage_date) FROM fruit_batches WHERE user_id = %s AND fruit_id = f.fruit_id AND is_active = 1)) as next_expiry_qty
-            FROM fruit_batches b
-            JOIN fruits f ON b.fruit_id = f.fruit_id
-            WHERE b.user_id = %s
+                    AND spoilage_date = (SELECT MIN(spoilage_date) FROM fruit_batches WHERE user_id = %s AND fruit_id = f.fruit_id AND is_active = 1)) as next_expiry_qty,
+                   (SELECT SUM(waste_kg) FROM waste_log WHERE user_id = %s AND fruit_id = f.fruit_id AND waste_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)) as waste_yesterday_qty
+            FROM fruits f
+            LEFT JOIN fruit_batches b ON f.fruit_id = b.fruit_id AND b.user_id = %s
             GROUP BY f.fruit_name
-            HAVING active_stock > 0 OR expired_stock > 0
-            ORDER BY active_stock DESC
-        """, (user_id, user_id, user_id, user_id))
+            ORDER BY active_stock DESC, product ASC
+        """, (user_id, user_id, user_id, user_id, user_id))
         inventory_raw = cursor.fetchall()
         
         today_date = date.today()
@@ -576,6 +697,7 @@ def get_dashboard_data():
         for item in inventory_raw:
             next_exp = item['next_expiry_date']
             next_qty = item['next_expiry_qty']
+            waste_yest = item['waste_yesterday_qty']
             note = "—"
             
             if next_exp:
@@ -591,6 +713,8 @@ def get_dashboard_data():
                     note = f"💀 {qty_str} expired!"
                 else:
                     note = f"{qty_str} in {days_left} day{'s' if days_left > 1 else ''}"
+            elif waste_yest and waste_yest > 0:
+                note = f"⚠️ {round(float(waste_yest), 1)} kg expired yesterday"
             
             inventory.append({
                 'product': item['product'],

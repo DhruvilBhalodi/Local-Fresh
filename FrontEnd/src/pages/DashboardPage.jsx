@@ -64,7 +64,7 @@ function OverviewTab({ user, fetchData: reloadMain }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  
+
   const [showSalesModal, setShowSalesModal] = useState(false);
   const [showWasteModal, setShowWasteModal] = useState(false);
   const [salesForm, setSalesForm] = useState(ALL_FRUITS.reduce((acc, f) => ({ ...acc, [f]: '' }), {}));
@@ -145,7 +145,7 @@ function OverviewTab({ user, fetchData: reloadMain }) {
   const kpis = [
     { title: 'Total Sales', value: `${data?.kpis?.totalSales || 0} kg`, icon: DollarSign, color: '#48a574' },
     { title: 'Total Waste', value: `${data?.kpis?.totalWaste || 0} kg`, icon: Recycle, color: '#ef4444' },
-    { title: 'Efficiency', value: `${data?.kpis?.efficiency || 0}%`, icon: Target, color: '#a855f7' },
+    { title: 'Model Confidence', value: `${data?.kpis?.efficiency || 0}%`, icon: Target, color: '#a855f7' },
     { title: 'Vendor ID', value: `#${user?.user_id}`, icon: Package, color: '#3b82f6' },
   ];
 
@@ -251,7 +251,7 @@ function OverviewTab({ user, fetchData: reloadMain }) {
             ) : (
               <div className="empty-state">No sales data yet</div>
             )}
-            <button className="btn btn-primary btn-sm" 
+            <button className="btn btn-primary btn-sm"
               style={{ width: '100%', marginTop: 20, background: '#48a574', borderRadius: 50, fontWeight: 700 }}
               onClick={() => {
                 setSalesForm(ALL_FRUITS.reduce((acc, f) => ({ ...acc, [f]: '' }), {}));
@@ -295,7 +295,7 @@ function OverviewTab({ user, fetchData: reloadMain }) {
             ) : (
               <div className="empty-state">No waste recorded recently</div>
             )}
-            <button className="btn btn-primary btn-sm" 
+            <button className="btn btn-primary btn-sm"
               style={{ width: '100%', marginTop: 20, background: '#ef4444', borderRadius: 50, fontWeight: 700 }}
               onClick={() => {
                 setWasteForm(ALL_FRUITS.reduce((acc, f) => ({ ...acc, [f]: '' }), {}));
@@ -427,9 +427,15 @@ function PredictionTab({ user }) {
   const weatherIcon = (cond) => {
     if (!cond) return <Cloud size={16} />;
     const c = cond.toLowerCase();
-    if (c.includes('sunny')) return <Sun size={16} style={{ color: '#eab308' }} />;
-    if (c.includes('rain')) return <Droplets size={16} style={{ color: '#3b82f6' }} />;
+    if (c.includes('sunny') || c.includes('clear')) return <Sun size={16} style={{ color: '#eab308' }} />;
+    if (c.includes('rain') || c.includes('drizzle') || c.includes('thunder')) return <Droplets size={16} style={{ color: '#3b82f6' }} />;
     return <Cloud size={16} style={{ color: '#94a3b8' }} />;
+  };
+
+  const weatherSourceBadge = (source) => {
+    if (!source || source === 'live') return <span style={{ fontSize: '0.65rem', background: 'rgba(72,165,116,0.15)', color: '#48a574', borderRadius: 99, padding: '1px 7px', fontWeight: 700, marginLeft: 6 }}>🟢 Live</span>;
+    if (source === 'custom') return <span style={{ fontSize: '0.65rem', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', borderRadius: 99, padding: '1px 7px', fontWeight: 700, marginLeft: 6 }}>🔵 Custom</span>;
+    return <span style={{ fontSize: '0.65rem', background: 'rgba(234,179,8,0.15)', color: '#eab308', borderRadius: 99, padding: '1px 7px', fontWeight: 700, marginLeft: 6 }}>🟡 Fallback</span>;
   };
 
   if (loading && !data && !forceRefreshing) return <div className="dash-loading"><RefreshCw className="spin" size={28} /><span>Loading predictions…</span></div>;
@@ -464,11 +470,11 @@ function PredictionTab({ user }) {
       {data && (
         <>
           {purchaseSuccess && <div className="purchase-success-banner"><CheckCircle size={18} /> Purchase recorded! Inventory updated.</div>}
-          
+
           <div className="card context-bar">
             <div className="ctx-item"><span className="ctx-label">Date</span><strong>{data.date}</strong></div>
             <div className="ctx-sep" />
-            <div className="ctx-item">{weatherIcon(data.weather?.condition)}<span className="ctx-label" style={{ marginLeft: 6 }}>Weather</span><strong>{data.weather?.condition} ({data.weather?.temperature_c}°C)</strong></div>
+            <div className="ctx-item">{weatherIcon(data.weather?.condition)}<span className="ctx-label" style={{ marginLeft: 6 }}>Weather</span><strong>{data.weather?.description || data.weather?.condition} ({data.weather?.temperature_c}°C){weatherSourceBadge(data.weather?.source)}</strong></div>
             <div className="ctx-sep" />
             <div className="ctx-item"><span className="ctx-label">Season</span><strong>{data.season}</strong></div>
           </div>
