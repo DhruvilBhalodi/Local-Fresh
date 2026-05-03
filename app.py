@@ -108,7 +108,7 @@ def get_shelf_status(user_id, today_dt):
                 
                 if days_left < 0:
                     shelf_status[fn] = {"flag": "EXPIRED", "message": "Batch expired!", "total_qty": total_q}
-                    # No alerts added here as requested
+                    alerts["expired"].append(fn) 
                 elif days_left == 0:
                     shelf_status[fn] = {"flag": "EXPIRING_TODAY", "message": "Expiring today", "total_qty": total_q}
                     alerts["expiring_today"].append(fn)
